@@ -1,0 +1,793 @@
+openapi: 3.0.3
+
+info:
+  title: API de Gestion de Contratos Legales (Republica Dominicana)
+  version: 1.0.0
+  description: |
+    El proyecto se enfoca en la gestion de contratos legales en la Republica Dominicana, diferenciandolos segun su **Clasificacion Legal** fundamental: Formal, Consensual y Real. El objetivo clave es modelar con precision las reglas de negocio que determinan cuando un contrato se perfecciona, es decir, pasa de ser un borrador (`DRAFT`) a estar legalmente completado y vinculante (`COMPLETED`), siguiendo la logica del derecho civil dominicano.
+
+    Esta aplicacion interactiva resume la arquitectura, patrones de diseno y logica de negocio implementada hasta la fecha.
+
+servers:
+  - url: http://localhost:5000
+    description: Servidor de desarrollo local
+
+paths:
+  /api/Contracts/CreateContract:
+    post:
+      summary: Crea un nuevo contrato
+      operationId: createContract
+      tags:
+        - Contracts
+      description: |
+        Crea un nuevo contrato en el sistema. Los datos de las partes (NIF/RUC) y
+        el monto total son validados mediante Value Objects para asegurar la
+        integridad de los datos. Actualmente solo soporta el tipo de detalle "Service".
+      requestBody:
+        description: Datos para crear un nuevo contrato
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContractCommand'
+            example:
+               legalClassification: "CONSENSUAL"
+               obligationNature: "BILATERAL"
+               economicNature: "ONEROUS"
+               rateAmount: 1050.00
+               currencyCode: "USD"
+               expectedEndDate: "2025-11-26T17:02:27Z"
+               details:
+                    type: "Service"
+                    description: "Alquiler de equipo de filmación por 7 días."
+                    rate_Price: "150/día"
+                    execution_Period: "2025-11-23T17:02:27Z"
+                    deliverables: "Fianza de 500 USD. Equipo devuelto en buen estado."
+               parties:
+                 - personTypeEnum: "LEGAL"
+                   taxIdentificationNumber: "402123456"
+                   fullNameorBussinesName: "Innovación Global S.R.L."
+                   address: "Calle Principal #100"
+                   contractRole: "CONTRACTOR2"
+                   hasGivenConsent: true
+                   hasLegalCapacity: true
+                 - personTypeEnum: "PHYSICAL"
+                   taxIdentificationNumber: "402-3312551-3"
+                   fullNameorBussinesName: "Juan Perez"
+                   address: "Avenida Secundaria #50"
+                   contractRole: "CONTRACTOR"
+                   hasGivenConsent: true
+                   hasLegalCapacity: true
+
+
+      responses:
+        '201':
+          description: Contrato creado y persistido.
+          headers:
+            Location:
+              description: URI del contrato recién creado.
+              schema:
+                type: string
+                format: uri
+                example: /api/Contracts/FindContract/d290f1ee-6c54-4b01-90e6-d701748f0851
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Data:
+                    type: object
+                    properties:
+                      IdNewContract:
+                        type: string
+                        format: uuid
+                        example: d290f1ee-6c54-4b01-90e6-d701748f0851
+                  IsSuccess:
+                    type: boolean
+                    example: true
+                  messages:
+                    type: string
+                    example: Contrato creado exitosamente
+
+        '400':
+          description: Solicitud inválida (validación) o error de dominio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                TaxIdError:
+                  value:
+                    code: Party.InvalidTaxId
+                    message: "Error de identificación para 'Innovación Global S.R.L.': El NIF/RUC no cumple con el formato requerido."
+                NotImplementedError:
+                  value:
+                    code: Details.NotImplemented
+                    message: "El tipo de contrato 'Rent' no está implementado."
+
+        '500':
+          description: Fallo interno del servidor o de la base de datos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/Contracts/FindContract/{id}:
+    get:
+      summary: Obtiene los detalles completos de un contrato por ID
+      operationId: getContractById
+      tags:
+        - Contracts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único (GUID) del contrato.
+          schema:
+            type: string
+            format: uuid
+            example: d290f1ee-6c54-4b01-90e6-d701748f0851
+      responses:
+        '200':
+          description: Contrato encontrado y devuelto con todos sus detalles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Data:
+                    $ref: '#/components/schemas/ContractDto'
+                  IsSuccess:
+                    type: boolean
+                    example: true
+                  messages:
+                    type: string
+                    example: Contrato encontrado exitosamente
+        '404':
+          description: Contrato no encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: Contract.NotFound
+                message: "No se encontró el contrato con ID 'd290f1ee-6c54-4b01-90e6-d701748f0851'"
+        '500':
+          description: Fallo interno del servidor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/Contracts/{id}/performance-data:
+    patch:
+      summary: Establece datos de formalización para contratos FORMALES
+      operationId: setFormalizationData
+      tags:
+        - Contracts
+      description: |
+        Actualiza el campo `FormalizationData` de un contrato, el cual es un requisito
+        de perfeccionamiento **solo para contratos con LegalClassification = FORMAL**
+        (e.g., registro notarial, número de acta).
+
+        **Restricciones de Dominio:**
+        1.  El contrato debe estar en estado `DRAFT`.
+        2.  El campo `FormalizationData` no puede ser nulo o vacío.
+        3.  Solo aplica a contratos de tipo FORMAL.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único (GUID) del contrato a actualizar.
+          schema:
+            type: string
+            format: uuid
+            example: d290f1ee-6c54-4b01-90e6-d701748f0851
+      requestBody:
+        description: Datos de formalización requeridos
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetFormalizationDataCommand'
+            example:
+              FormalizationData: "Acta Notarial No. 456-A, registrada en fecha 2025-12-05"
+      responses:
+        '200':
+          description: Datos de formalización actualizados exitosamente.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    example: Actualizado exitosamente
+        '400':
+          description: Solicitud inválida debido a reglas de dominio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ContractNotFound:
+                  value:
+                    code: Contract.NotFound
+                    message: "No se encontró el contrato con Id d290f1ee-6c54-4b01-90e6-d701748f0851"
+                InvalidLegalClassification:
+                  value:
+                    code: Formalization.InvalidType
+                    message: "Solo los contratos FORMALES requieren datos de formalización."
+                InvalidState:
+                  value:
+                    code: Formalization.InvalidState
+                    message: "Solo se pueden establecer datos de formalización en estado DRAFT."
+        '500':
+          description: Fallo interno del servidor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/Contracts/{id}/performance-date:
+    patch:
+      summary: Establece la fecha de ejecución para contratos REALES
+      operationId: setPerformanceDate
+      tags:
+        - Contracts
+      description: |
+        Actualiza el campo `PerformanceDate` de un contrato, el cual es un requisito
+        de perfeccionamiento **solo para contratos con LegalClassification = REAL**.
+        (La entrega del objeto o ejecución de la obligación).
+
+        **Restricciones de Dominio:**
+        1.  Solo aplica a contratos de tipo REAL.
+        2.  La fecha de ejecución no puede ser futura.
+        3.  El contrato no debe estar en estado `COMPLETED`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único (GUID) del contrato a actualizar.
+          schema:
+            type: string
+            format: uuid
+            example: d290f1ee-6c54-4b01-90e6-d701748f0851
+      requestBody:
+        description: Fecha de ejecución requerida.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPerformanceDateCommand'
+            example:
+              PerformanceDate: "2025-12-05T10:00:00Z"
+      responses:
+        '200':
+          description: Fecha de ejecución actualizada exitosamente.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    example: Actualizado exitosamente
+        '400':
+          description: Solicitud inválida debido a reglas de dominio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ContractNotFound:
+                  value:
+                    code: Contract.NotFound
+                    message: "No se encontró el contrato con Id d290f1ee-6c54-4b01-90e6-d701748f0851"
+                InvalidLegalClassification:
+                  value:
+                    code: PerformanceDate.InvalidType
+                    message: "La fecha de ejecución (PerformanceDate) solo aplica a contratos con clasificación LEGAL de tipo REAL."
+                InvalidDate:
+                  value:
+                    code: PerformanceDate.FutureDate
+                    message: "La fecha de ejecución no puede ser futura."
+        '500':
+          description: Fallo interno del servidor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/Contracts/{id}/AttemptToPerfect:
+    patch:
+      summary: Intenta perfeccionar el contrato (pasar a estado COMPLETED)
+      operationId: attemptToPerfectContract
+      tags:
+        - Contracts
+      description: |
+        Activa la lógica de dominio para evaluar si el contrato cumple con **todos**
+        los requisitos de perfeccionamiento según su `LegalClassification`:
+        
+        **Requisitos Universales:**
+        1.  El contrato no debe estar ya en estado `COMPLETED`.
+        2.  Todas las partes deben haber otorgado su consentimiento (`HasGivenConsent = true`).
+        3.  Los detalles específicos del contrato (`ContractDetails`) deben ser válidos.
+
+        **Requisitos de Clasificación (Excluyentes):**
+        * **CONSENSUAL:** Si cumple los universales, se perfecciona inmediatamente.
+        * **REAL:** Debe tener la `PerformanceDate` establecida.
+        * **FORMAL:** Debe tener el `FormalizationData` establecido.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único (GUID) del contrato a perfeccionar.
+          schema:
+            type: string
+            format: uuid
+            example: d290f1ee-6c54-4b01-90e6-d701748f0851
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PerfectContractCommand'
+        description: Comando sin cuerpo (se ignora el cuerpo JSON, solo se usa el ID de la ruta).
+        required: false
+      responses:
+        '200':
+          description: El contrato ha cumplido todos los requisitos y se ha pasado al estado COMPLETED.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    example: Perfeccionado exitosamente
+        '400':
+          description: Error de dominio, el contrato no cumple con algún requisito de perfeccionamiento.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ContractNotFound:
+                  value:
+                    code: Contract.NotFound
+                    message: "No se encontró el contrato con Id d290f1ee-6c54-4b01-90e6-d701748f0851"
+                AlreadyPerfected:
+                  value:
+                    code: Perfection.AlreadyPerfected
+                    message: "El contrato ya ha sido perfeccionado."
+                ConsentMissing:
+                  value:
+                    code: Perfection.ConsentMissing
+                    message: "Falta el consentimiento de una o más partes para perfeccionar el contrato."
+                RequirementMissing:
+                  value:
+                    code: Perfection.RequirementMissing
+                    message: "Requisito de perfeccionamiento faltante: Se requiere 'FormalizationData' para contratos FORMALES."
+        '500':
+          description: Fallo interno del servidor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/Contracts/{id}/createpdfcontract:
+    get:
+      summary: Genera y descarga el contrato en formato PDF
+      operationId: createPdfContract
+      tags:
+        - Contracts
+      description: |
+        Genera el documento final del contrato en formato PDF a partir de los datos almacenados.
+        Este endpoint típicamente requiere que el contrato esté en estado `COMPLETED`
+        para asegurar que todos los requisitos de perfeccionamiento hayan sido validados.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único (GUID) del contrato para generar el PDF.
+          schema:
+            type: string
+            format: uuid
+            example: f0945224-89c9-4562-3b7c-08de2531ebeb
+      responses:
+        '200':
+          description: Documento PDF del contrato generado exitosamente.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+              example: [PDF Contract Binary Content] # Contenido binario del PDF
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: attachment; filename="Contrato_f0945224-89c9-4562-3b7c-08de2531ebeb.pdf"
+        '400':
+          description: Solicitud inválida o el contrato no puede ser generado (ej. no está COMPLETED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ContractNotFound:
+                  value:
+                    code: Contract.NotFound
+                    message: "No se encontró el contrato con Id f0945224-89c9-4562-3b7c-08de2531ebeb"
+                NotReadyForPdf:
+                  value:
+                    code: Pdf.NotCompleted
+                    message: "El contrato no está en estado COMPLETED. No se puede generar el documento final."
+        '500':
+          description: Fallo interno del servidor durante la generación del PDF.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+components:
+  schemas:
+    # =========================================================================
+    # DEFINICIONES DE ENUMS
+    # =========================================================================
+
+    LegalClassificationEnum:
+      type: string
+      description: Clasificación legal del contrato según el derecho civil (Rep. Dom.).
+      enum:
+        - CONSENSUAL
+        - REAL
+        - FORMAL
+      example: CONSENSUAL
+
+    ObligatoryNatureEnum:
+      type: string
+      description: Naturaleza de la obligación del contrato.
+      enum:
+        - UNILATERAL
+        - BILATERAL
+      example: BILATERAL
+
+    EconomicNatureEnum:
+      type: string
+      description: Naturaleza económica del contrato.
+      enum:
+        - ONEROUS
+        - FREE
+      example: ONEROUS
+
+    PersonTypeEnum:
+      type: string
+      description: Tipo de identidad de la parte contratante.
+      enum:
+        - PHYSICAL
+        - LEGAL
+      example: LEGAL
+
+    ContractRoleEnum:
+      type: string
+      description: Rol de la parte dentro de la relación contractual.
+      enum:
+        - CONTRACTOR
+        - CONTRACTOR2
+        - LESSOR
+        - LESSEE
+        - SELLER
+        - BUYER
+      example: CONTRACTOR2
+
+    ContractStateEnum:
+      type: string
+      description: Estado actual del ciclo de vida del contrato.
+      enum:
+        - DRAFT
+        - PENDING_IMPROVEMENT
+        - CURRENT
+        - COMPLETED
+        - CANCELLED
+      example: DRAFT
+      
+    CurrencyTypeEnum:
+      type: string
+      description: Tipos de moneda soportados para los montos financieros.
+      enum:
+        - USD
+        - DOP
+        - EUR
+      example: USD
+
+    # =========================================================================
+    # VALUE OBJECTS
+    # =========================================================================
+
+    MoneyValueObject:
+      type: object
+      description: Representa un monto monetario con su divisa (Value Object).
+      properties:
+        Amount:
+          type: number
+          format: float
+          description: El monto del dinero. Debe ser mayor a 0 y redondeado a 2 decimales.
+          minimum: 0.01
+          example: 1050.00
+        Currency:
+          $ref: '#/components/schemas/CurrencyTypeEnum'
+      required:
+        - Amount
+        - Currency
+
+    TaxIdentificationValueObject:
+      type: object
+      description: Identificación tributaria (Cédula o RNC). Valida el formato dominicano (Value Object).
+      properties:
+        Value:
+          type: string
+          description: |
+            Número de Cédula (formato 000-0000000-0) o RNC (formato 000000000). 
+            Se espera que el valor cumpla uno de estos dos patrones de expresión regular.
+          example: 402-3312551-3
+          pattern: '^\\d{3}-\\d{7}-\\d{1}$|^\\d{9}$'
+      required:
+        - Value
+
+    # =========================================================================
+    # DTOs y COMMANDS
+    # =========================================================================
+
+    ContractDetailsDto:
+      type: object
+      required:
+        - type
+        - description
+        - rate_Price
+        - execution_Period
+      properties:
+        type:
+          type: string
+          description: Tipo de contrato que se detalla. (Actualmente solo soporta 'Service').
+          enum: [Service] # Limitado a 'Service' según la implementación actual.
+          example: Service
+        description:
+          type: string
+          description: Descripción detallada del servicio o bien (Objeto del contrato).
+          example: Alquiler de equipo de filmación por 7 días.
+        rate_Price:
+          type: string
+          description: Tarifa o precio asociado a la ejecución (ej. "150/día"). Validado por Regex en el dominio.
+          example: 150/día
+        execution_Period:
+          type: string
+          format: date-time
+          description: Periodo o fecha de ejecución del servicio/contrato. Debe ser mayor a la fecha de referencia.
+          example: "2025-11-23T17:02:27Z"
+        deliverables:
+          type: string
+          description: Entregables o condiciones adicionales (ej. Fianza de 500 USD).
+          example: Fianza de 500 USD. Equipo devuelto en buen estado.
+          
+    ContractDetailsData:
+      type: object
+      description: Detalles específicos del contrato.
+      properties:
+        Type:
+          type: string
+          description: Tipo de detalle del contrato (e.g., "Service").
+          enum: [Service]
+          example: Service
+        Description:
+          type: string
+          example: Alquiler de equipo de filmación por 7 días.
+        Rate_Price:
+          type: string
+          example: 150/día
+        Execution_Period:
+          type: string
+          format: date-time
+          example: "2025-11-23T17:02:27Z"
+        Deliverables:
+          type: string
+          example: Fianza de 500 USD. Equipo devuelto en buen estado.
+
+    TaxIdentificationData:
+      type: object
+      description: Datos simplificados de identificación para el DTO de respuesta.
+      properties:
+        TaxIdentificationNumber:
+          type: string
+          description: NIF, RUC o Cédula.
+          example: 402-3312551-3
+
+    MoneyDto:
+      type: object
+      description: Monto total del contrato para el DTO de respuesta.
+      properties:
+        Amount:
+          type: number
+          format: float
+          example: 1050.00
+        Currency:
+          $ref: '#/components/schemas/CurrencyTypeEnum'
+
+    ContractingPartyData:
+      type: object
+      description: Información de una parte contratante para el DTO de respuesta.
+      properties:
+        PersonTypeEnum:
+          $ref: '#/components/schemas/PersonTypeEnum'
+        TaxIdentificationNumber:
+          $ref: '#/components/schemas/TaxIdentificationData'
+        FullNameorBussinesName:
+          type: string
+          example: Juan Perez
+        Address:
+          type: string
+          example: Avenida Secundaria #50
+        ContractRole:
+          $ref: '#/components/schemas/ContractRoleEnum'
+        hasGivenConsent:
+          type: boolean
+          example: true
+        hasLegalCapacity:
+          type: boolean
+          example: true
+
+    ContractDto:
+      type: object
+      description: Estructura completa de un contrato para la respuesta de consulta.
+      properties:
+        Id:
+          type: string
+          format: uuid
+          example: f0945224-89c9-4562-3b7c-08de2531ebeb
+        LegalClassification:
+          $ref: '#/components/schemas/LegalClassificationEnum'
+        Status:
+          $ref: '#/components/schemas/ContractStateEnum'
+        CreatedDate:
+          type: string
+          format: date-time
+          example: "2025-11-16T13:02:27Z"
+        ExpectedEndDate:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2025-11-26T17:02:27Z"
+        TotalAmount:
+          $ref: '#/components/schemas/MoneyDto'
+        Parties:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContractingPartyData'
+        Details:
+          $ref: '#/components/schemas/ContractDetailsData'
+
+    SetFormalizationDataCommand:
+      type: object
+      description: Comando para establecer los datos de formalización de un contrato (solo para contratos FORMALES).
+      required:
+        - FormalizationData
+      properties:
+        FormalizationData:
+          type: string
+          description: Datos o referencia de la formalización (e.g., número de acta notarial, referencia de registro público).
+          example: Acta Notarial No. 456-A, registrada en fecha 2025-12-05
+
+    SetPerformanceDateCommand:
+      type: object
+      description: Comando para establecer la fecha de ejecución/entrega del objeto del contrato (solo para contratos REALES).
+      required:
+        - PerformanceDate
+      properties:
+        PerformanceDate:
+          type: string
+          format: date-time
+          description: Fecha y hora en la que se realizó la ejecución de la obligación o la entrega del objeto. Debe ser una fecha pasada o presente.
+          example: "2025-12-05T10:00:00Z"
+
+    PerfectContractCommand:
+      type: object
+      description: Comando para intentar perfeccionar un contrato. No requiere datos en el cuerpo (usa el ID de la ruta).
+      properties:
+        Id:
+          type: string
+          format: uuid
+          description: (Ignorado en el cuerpo, se toma de la ruta) ID del contrato.
+          example: d290f1ee-6c54-4b01-90e6-d701748f0851
+
+    CreateContractCommand:
+      type: object
+      required:
+        - legalClassification
+        - obligationNature
+        - economicNature
+        - rateAmount
+        - currencyCode
+        - expectedEndDate
+        - details
+        - parties
+      properties:
+        legalClassification:
+          $ref: '#/components/schemas/LegalClassificationEnum'
+        obligationNature:
+          $ref: '#/components/schemas/ObligatoryNatureEnum'
+        economicNature:
+          $ref: '#/components/schemas/EconomicNatureEnum'
+        rateAmount:
+          type: number
+          format: float
+          description: Monto total estimado del contrato. **Sigue las reglas de MoneyValueObject.**
+          example: 1050.00
+        currencyCode:
+          type: string
+          description: Código ISO de la moneda (ej. USD, EUR, DOP). **Sigue las reglas de CurrencyTypeEnum/MoneyValueObject.**
+          enum: [USD, DOP, EUR]
+          example: USD
+        expectedEndDate:
+          type: string
+          format: date-time
+          description: Fecha prevista de finalización.
+          example: "2025-11-26T17:02:27Z"
+        details:
+          $ref: '#/components/schemas/ContractDetailsDto'
+        parties:
+          type: array
+          description: Lista de las partes contratantes. Mínimo 2 partes requeridas.
+          items:
+            $ref: '#/components/schemas/PartyDataDto'
+          minItems: 2 # Mínimo 2 partes para un contrato.
+
+    PartyDataDto:
+      type: object
+      required:
+        - personTypeEnum
+        - taxIdentificationNumber
+        - fullNameorBussinesName
+        - address
+        - contractRole
+        - hasGivenConsent
+        - hasLegalCapacity
+      properties:
+        personTypeEnum:
+          $ref: '#/components/schemas/PersonTypeEnum'
+        taxIdentificationNumber:
+          type: string
+          description: NIF, RUC o Cédula. **Sigue las reglas de TaxIdentificationValueObject.**
+          example: 402123456
+        fullNameorBussinesName:
+          type: string
+          description: Nombre completo o Razón Social.
+          example: Innovación Global S.R.L.
+        address:
+          type: string
+          description: Dirección física de la parte.
+          example: Calle Principal #100
+        contractRole:
+          $ref: '#/components/schemas/ContractRoleEnum'
+        hasGivenConsent:
+          type: boolean
+          description: Indica si la parte ha dado su consentimiento.
+          example: true
+        hasLegalCapacity:
+          type: boolean
+          example: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Código interno del error.
+          example: INPUT.VALIDATION
+        message:
+          type: string
+          description: Descripción del error.
+          example: El campo 'rateAmount' es requerido y no puede ser nulo.
