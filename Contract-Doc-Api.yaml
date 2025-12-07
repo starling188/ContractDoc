@@ -8,13 +8,15 @@ info:
     Esta aplicacion interactiva resume la arquitectura, patrones de diseno y logica de negocio implementada hasta la fecha.
 
 servers:
-  - url: http://contract-api.tryasp.net
-    description: Servidor de Producción/Staging
-  - url: http://localhost:5000
-    description: Servidor de desarrollo local
+  - url: http://contract-api.tryasp.net/api/v1
+    description: Servidor de producción (Deployado)
+# --- Las rutas se construyen a partir de la nueva URL base:
+#     http://contract-api.tryasp.net/api/v1 + /Contracts/CreateContract
+#     http://contract-api.tryasp.net/api/v1 + /Contracts/FindContract/{id}
+#     etc.
 
 paths:
-  /api/v1/Contracts/CreateContract:
+  /Contracts/CreateContract:
     post:
       summary: Crea un nuevo contrato
       operationId: createContract
@@ -70,7 +72,7 @@ paths:
               schema:
                 type: string
                 format: uri
-                example: /api/v1/Contracts/FindContract/d290f1ee-6c54-4b01-90e6-d701748f0851
+                example: /Contracts/FindContract/d290f1ee-6c54-4b01-90e6-d701748f0851
           content:
             application/json:
               schema:
@@ -113,7 +115,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/Contracts/FindContract/{id}:
+  /Contracts/FindContract/{id}:
     get:
       summary: Obtiene los detalles completos de un contrato por ID
       operationId: getContractById
@@ -160,7 +162,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/Contracts/{id}/performance-data:
+  /Contracts/{id}/performance-data:
     patch:
       summary: Establece datos de formalización para contratos FORMALES
       operationId: setFormalizationData
@@ -230,7 +232,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/Contracts/{id}/performance-date:
+  /Contracts/{id}/performance-date:
     patch:
       summary: Establece la fecha de ejecución para contratos REALES
       operationId: setPerformanceDate
@@ -300,7 +302,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/Contracts/{id}/AttemptToPerfect:
+  /Contracts/{id}/AttemptToPerfect:
     patch:
       summary: Intenta perfeccionar el contrato (pasar a estado COMPLETED)
       operationId: attemptToPerfectContract
@@ -376,7 +378,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/Contracts/{id}/createpdfcontract:
+  /Contracts/{id}/createpdfcontract:
     get:
       summary: Genera y descarga el contrato en formato PDF
       operationId: createPdfContract
@@ -434,7 +436,6 @@ paths:
 
 components:
   schemas:
-    # ... (El resto de las definiciones de schemas, DTOs y Commands se mantienen sin cambios)
     # =========================================================================
     # DEFINICIONES DE ENUMS
     # =========================================================================
