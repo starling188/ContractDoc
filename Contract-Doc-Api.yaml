@@ -8,7 +8,7 @@ info:
     Esta aplicacion interactiva resume la arquitectura, patrones de diseno y logica de negocio implementada hasta la fecha.
 
 servers:
-  - url: http://contract-api.tryasp.net/api/v1
+  - url: https://contract-api.tryasp.net/api/v1
     description: Servidor de producción (Deployado)
 # --- Las rutas se construyen a partir de la nueva URL base:
 #     http://contract-api.tryasp.net/api/v1 + /Contracts/CreateContract
